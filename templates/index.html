@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Arcova Homes - WhatsApp Inbox</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        body { display: flex; height: 100vh; background-color: #f0f2f5; }
+        
+        /* Left Sidebar: Contact list */
+        #sidebar { width: 340px; background: #ffffff; border-right: 1px solid #e0e0e0; display: flex; flex-direction: column; }
+        #sidebar-header { padding: 18px; font-size: 18px; font-weight: bold; background: #075e54; color: #fff; }
+        #contact-list { overflow-y: auto; flex: 1; }
+        .contact-item { padding: 14px; border-bottom: 1px solid #f2f2f2; cursor: pointer; }
+        .contact-item:hover, .contact-item.active { background-color: #ebebeb; }
+        .contact-phone { font-weight: 600; color: #111; }
+        .contact-preview { font-size: 13px; color: #666; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 4px; }
+        
+        /* Right Chat Area */
+        #chat-area { flex: 1; display: flex; flex-direction: column; background: #efeae2; }
+        #chat-header { padding: 16px; background: #ededed; font-weight: bold; border-bottom: 1px solid #ddd; }
+        #messages-box { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+        
+        /* Message bubbles */
+        .msg { max-width: 60%; padding: 10px 14px; border-radius: 8px; font-size: 14px; line-height: 1.4; }
+        .msg.customer { align-self: flex-start; background: #ffffff; color: #000; }
+        .msg.business { align-self: flex-end; background: #d9fdd3; color: #000; }
+        .msg-time { font-size: 10px; color: #888; text-align: right; margin-top: 4px; }
+
+        /* Reply box */
+        #input-area { display: flex; padding: 12px; background: #f0f0f0; border-top: 1px solid #ddd; }
+        #reply-input { flex: 1; padding: 12px; border: 1px solid #ccc; border-radius: 20px; outline: none; font-size: 14px; }
+        #send-btn { margin-left: 10px; padding: 0 22px; background: #075e54; color: white; border: none; border-radius: 20px; font-weight: bold; cursor: pointer; }
+        #send-btn:hover { background: #128c7e; }
+    </style>
+</head>
+<body>
+
+    <div id="sidebar">
+        <div id="sidebar-header">Arcova Conversations</div>
+        <div id="contact-list"></div>
+    </div>
+
+    <div id="chat-area">
+        <div id="chat-header">Select a contact to view chat</div>
+        <div id="messages-box"></div>
+        <div id="input-area" style="display: none;">
+            <input type="text" id="reply-input" placeholder="Type your WhatsApp reply..." onkeypress="if(event.key==='Enter') sendReply()">
+            <button id="send-btn" onclick="sendReply()">Send</button>
+        </div>
+    </div>
+
+    <script>
+        let selectedPhone = null;
+
+        // Fetch contacts list every 3 seconds
+        async function loadConversations() {
+            const res = await fetch('/api/conversations');
+            const contacts = await res.json();
+            const listEl = document.getElementById('contact-list');
+            listEl.innerHTML = '';
+
+            contacts.forEach(c => {
+                const div = document.createElement('div');
+                div.className = 'contact-item' + (c.phone === selectedPhone ? ' active' : '');
+                div.onclick = () => selectContact(c.phone);
+                div.innerHTML = `
+                    <div class="contact-phone">+${c.phone}</div>
+                    <div class="contact-preview">${c.last_message}</div>
+                `;
+                listEl.appendChild(div);
+            });
+        }
+
+        async function selectContact(phone) {
+            selectedPhone = phone;
+            document.getElementById('chat-header').innerText = 'Chat with +' + phone;
+            document.getElementById('input-area').style.display = 'flex';
+            loadMessages();
+        }
+
+        // Fetch active messages every 3 seconds
+        async function loadMessages() {
+            if (!selectedPhone) return;
+            const res = await fetch(`/api/messages/${selectedPhone}`);
+            const messages = await res.json();
+            const box = document.getElementById('messages-box');
+            box.innerHTML = '';
+
+            messages.forEach(m => {
+                const bubble = document.createElement('div');
+                bubble.className = `msg ${m.sender}`;
+                bubble.innerHTML = `<div>${m.text}</div><div class="msg-time">${m.timestamp}</div>`;
+                box.appendChild(bubble);
+            });
+            box.scrollTop = box.scrollHeight;
+        }
+
+        async function sendReply() {
+            const input = document.getElementById('reply-input');
+            const text = input.value.trim();
+            if (!text || !selectedPhone) return;
+
+            input.value = '';
+            const res = await fetch('/api/send_reply', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ phone: selectedPhone, text: text })
+            });
+
+            if (res.ok) {
+                loadMessages();
+                loadConversations();
+            } else {
+                alert('Failed to send message.');
+            }
+        }
+
+        // Auto-refresh loops
+        setInterval(loadConversations, 3000);
+        setInterval(() => { if (selectedPhone) loadMessages(); }, 3000);
+        loadConversations();
+    </script>
+</body>
+</html>
