@@ -2,14 +2,17 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Arcova Homes - WhatsApp Inbox</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         body { display: flex; height: 100vh; background-color: #f0f2f5; }
         #sidebar { width: 340px; background: #ffffff; border-right: 1px solid #e0e0e0; display: flex; flex-direction: column; }
         #sidebar-header { padding: 14px 18px; font-size: 17px; font-weight: bold; background: #075e54; color: #fff; display: flex; justify-content: space-between; align-items: center; }
-        .nav-btn { background: #25d366; color: #111; padding: 6px 12px; font-size: 13px; font-weight: bold; text-decoration: none; border-radius: 4px; }
+        .nav-btn { background: #25d366; color: #111; padding: 6px 12px; font-size: 13px; font-weight: bold; text-decoration: none; border-radius: 4px; display: inline-block; }
         .nav-btn:hover { background: #1eb954; }
+        .btn-logout { background-color: #d9534f !important; color: #ffffff !important; transition: background-color 0.2s ease; }
+        .btn-logout:hover { background-color: #c9302c !important; }
         #contact-list { overflow-y: auto; flex: 1; }
         .contact-item { padding: 14px; border-bottom: 1px solid #f2f2f2; cursor: pointer; }
         .contact-item:hover, .contact-item.active { background-color: #ebebeb; }
@@ -33,7 +36,10 @@
     <div id="sidebar">
         <div id="sidebar-header">
             <span>Arcova Chats</span>
-            <a href="/broadcast" class="nav-btn">Bulk SMS</a>
+            <div style="display: flex; gap: 8px; align-items: center;">
+                <a href="/broadcast" class="nav-btn">Bulk SMS</a>
+                <a href="/logout" class="nav-btn btn-logout">Logout</a>
+            </div>
         </div>
         <div id="contact-list"></div>
     </div>
@@ -52,6 +58,10 @@
 
         async function loadConversations() {
             const res = await fetch('/api/conversations');
+            if (res.status === 401 || res.redirected) {
+                window.location.href = '/login';
+                return;
+            }
             const contacts = await res.json();
             const listEl = document.getElementById('contact-list');
             listEl.innerHTML = '';
