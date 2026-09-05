@@ -44,7 +44,7 @@ INSERT INTO admins (username, password)
 VALUES ('admin', 'Arcova@2026')
 ON CONFLICT (username) DO NOTHING;
 
-# Add collum in message_table
+# Add colum in message_table
 ALTER TABLE messages 
 ADD COLUMN IF NOT EXISTS wamid TEXT,
 ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'sent',
