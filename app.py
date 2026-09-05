@@ -1,4 +1,5 @@
 from datetime import datetime
+from functools import wraps
 import io
 import os
 import time
@@ -11,6 +12,7 @@ from flask import (
     render_template,
     request,
     send_file,
+    session,
     url_for,
 )
 import pandas as pd
@@ -36,10 +38,23 @@ if not SUPABASE_URL or not SUPABASE_KEY:
     print("WARNING: SUPABASE_URL or SUPABASE_KEY environment variables are missing!")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
-# ---------------------------------------------------------
-#Log in route
-# ---------------------------------------------------------
 
+
+# ---------------------------------------------------------
+# Authentication Guard Decorator
+# ---------------------------------------------------------
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get("logged_in"):
+            return redirect(url_for("login"))
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+# ---------------------------------------------------------
+# Authentication Routes
+# ---------------------------------------------------------
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
@@ -51,7 +66,6 @@ def login():
             return redirect(url_for("login"))
 
         try:
-            # Query Supabase for matching credentials
             response = (
                 supabase.table("admins")
                 .select("username")
@@ -61,7 +75,6 @@ def login():
                 .execute()
             )
 
-            # If a match is found in the database
             if response.data and len(response.data) > 0:
                 session["logged_in"] = True
                 session["user"] = response.data[0]["username"]
@@ -75,14 +88,20 @@ def login():
             flash("Database connection error. Try again.", "login_error")
             return redirect(url_for("login"))
 
-    # If already logged in, redirect straight to dashboard
     if session.get("logged_in"):
         return redirect(url_for("dashboard"))
 
     return render_template("login.html")
 
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
 # ---------------------------------------------------------
-# Webhook Verification & Message Receiving
+# Webhook Verification & Receiving (Must Stay Public)
 # ---------------------------------------------------------
 @app.route("/webhook", methods=["GET"])
 def verify_webhook():
@@ -116,7 +135,6 @@ def receive_message():
             else:
                 text = f"[{msg_obj.get('type', 'MEDIA').upper()} attachment]"
 
-            # Store customer message in Supabase
             supabase.table("messages").insert(
                 {
                     "phone": str(phone),
@@ -133,14 +151,16 @@ def receive_message():
 
 
 # ---------------------------------------------------------
-# Web Dashboard Routes
+# Protected Dashboard & Chat API Routes
 # ---------------------------------------------------------
 @app.route("/")
+@login_required
 def dashboard():
     return render_template("index.html")
 
 
 @app.route("/api/conversations", methods=["GET"])
+@login_required
 def get_conversations():
     try:
         res = (
@@ -171,6 +191,7 @@ def get_conversations():
 
 
 @app.route("/api/messages/<phone>", methods=["GET"])
+@login_required
 def get_messages(phone):
     try:
         res = (
@@ -195,6 +216,7 @@ def get_messages(phone):
 
 
 @app.route("/api/send_reply", methods=["POST"])
+@login_required
 def send_reply():
     req_data = request.get_json()
     phone = req_data.get("phone")
@@ -233,9 +255,10 @@ def send_reply():
 
 
 # ---------------------------------------------------------
-# Dynamic Bulk Broadcast Route
+# Dynamic Bulk Broadcast Route (Protected)
 # ---------------------------------------------------------
 @app.route("/broadcast", methods=["GET", "POST"])
+@login_required
 def broadcast():
     if request.method == "POST":
         uploaded_file = request.files.get("file")
@@ -283,7 +306,6 @@ def broadcast():
                     )
                     continue
 
-                # Format Phone Number
                 phone = "".join(c for c in str(raw_phone) if c.isdigit())
                 if len(phone) == 10:
                     phone = "91" + phone
@@ -393,9 +415,10 @@ def broadcast():
 
 
 # ---------------------------------------------------------
-# Dynamic Excel Sample Generator
+# Dynamic Excel Sample Generator (Protected)
 # ---------------------------------------------------------
 @app.route("/download-sample")
+@login_required
 def download_sample():
     sample_data = {
         "Phone": ["919556681223", "919937780774", "917008973622"],
