@@ -7,55 +7,72 @@
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         body { display: flex; height: 100vh; background-color: #f0f2f5; }
-        #sidebar { width: 340px; background: #ffffff; border-right: 1px solid #e0e0e0; display: flex; flex-direction: column; }
-        #sidebar-header { padding: 14px 18px; font-size: 17px; font-weight: bold; background: #075e54; color: #fff; display: flex; justify-content: space-between; align-items: center; }
-        .nav-btn { background: #25d366; color: #111; padding: 6px 12px; font-size: 13px; font-weight: bold; text-decoration: none; border-radius: 4px; display: inline-block; }
+        #sidebar { width: 350px; background: #ffffff; border-right: 1px solid #e0e0e0; display: flex; flex-direction: column; }
+        #sidebar-header { padding: 14px 16px; font-size: 16px; font-weight: bold; background: #075e54; color: #fff; display: flex; justify-content: space-between; align-items: center; }
+        .nav-btn { background: #25d366; color: #111; padding: 6px 10px; font-size: 12px; font-weight: bold; text-decoration: none; border-radius: 4px; border: none; cursor: pointer; }
         .nav-btn:hover { background: #1eb954; }
         .btn-logout { background-color: #d9534f !important; color: #ffffff !important; transition: background-color 0.2s ease; }
         .btn-logout:hover { background-color: #c9302c !important; }
+
+        #new-chat-bar { padding: 10px 14px; background: #f7f7f7; border-bottom: 1px solid #e0e0e0; }
+        .btn-open-modal { width: 100%; padding: 8px; background: #075e54; color: #fff; border: none; border-radius: 5px; font-weight: 600; font-size: 13px; cursor: pointer; }
+        .btn-open-modal:hover { background: #128c7e; }
+
         #contact-list { overflow-y: auto; flex: 1; }
         .contact-item { padding: 14px; border-bottom: 1px solid #f2f2f2; cursor: pointer; }
         .contact-item:hover, .contact-item.active { background-color: #ebebeb; }
         .contact-phone { font-weight: 600; color: #111; }
         .contact-preview { font-size: 13px; color: #666; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 4px; }
+
         #chat-area { flex: 1; display: flex; flex-direction: column; background: #efeae2; }
         #chat-header { padding: 16px; background: #ededed; font-weight: bold; border-bottom: 1px solid #ddd; }
         #messages-box { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+        
         .msg { max-width: 60%; padding: 10px 14px; border-radius: 8px; font-size: 14px; line-height: 1.4; }
         .msg.customer { align-self: flex-start; background: #ffffff; color: #000; }
         .msg.business { align-self: flex-end; background: #d9fdd3; color: #000; }
+
+        /* Undelivered / Failed Red Message Styling */
+        .msg.business.msg-failed {
+            background-color: #ffebe8 !important;
+            border: 1px solid #f5c2c7 !important;
+            color: #842029 !important;
+        }
+
         .msg-time { font-size: 10px; color: #888; text-align: right; margin-top: 4px; }
+        
+        .msg-status-failed {
+            font-size: 11px;
+            font-weight: bold;
+            color: #dc3545;
+            text-align: right;
+            margin-top: 4px;
+        }
+
+        .error-badge {
+            display: inline-block;
+            font-size: 10px;
+            background: #f8d7da;
+            color: #842029;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-top: 3px;
+            border: 1px solid #f5c2c7;
+        }
+
         #input-area { display: flex; padding: 12px; background: #f0f0f0; border-top: 1px solid #ddd; }
         #reply-input { flex: 1; padding: 12px; border: 1px solid #ccc; border-radius: 20px; outline: none; font-size: 14px; }
         #send-btn { margin-left: 10px; padding: 0 22px; background: #075e54; color: white; border: none; border-radius: 20px; font-weight: bold; cursor: pointer; }
         #send-btn:hover { background: #128c7e; }
-        .msg-status {
-            font-size: 11px;
-            margin-top: 4px;
-            text-align: right;
-                }
-        .status-failed {
-            color: #d9534f;
-            font-weight: bold;
-            }
-        .status-delivered {
-        color: #5bc0de;
-        }
-        .status-read {
-        color: #337ab7;
-        font-weight: bold;
-        }
-        .error-tip {
-        font-size: 10px;
-        color: #c9302c;
-        background: #ffe6e6;
-        padding: 3px 6px;
-        border-radius: 4px;
-        margin-top: 3px;
-        display: inline-block;
-        }
-        
-        
+
+        /* Modal Styles */
+        #modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 1000; }
+        .modal-box { background: #fff; padding: 24px; border-radius: 8px; width: 90%; max-width: 400px; box-shadow: 0 4px 16px rgba(0,0,0,0.2); }
+        .modal-box h3 { margin-bottom: 14px; color: #075e54; font-size: 18px; }
+        .modal-input { width: 100%; padding: 10px; margin-bottom: 12px; border: 1px solid #ccc; border-radius: 5px; font-size: 14px; }
+        .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
+        .btn-cancel { background: #ccc; border: none; padding: 8px 14px; border-radius: 4px; cursor: pointer; font-weight: 600; }
+        .btn-send-new { background: #075e54; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: 600; }
     </style>
 </head>
 <body>
@@ -63,11 +80,16 @@
     <div id="sidebar">
         <div id="sidebar-header">
             <span>Arcova Chats</span>
-            <div style="display: flex; gap: 8px; align-items: center;">
+            <div style="display: flex; gap: 6px; align-items: center;">
                 <a href="/broadcast" class="nav-btn">Bulk SMS</a>
                 <a href="/logout" class="nav-btn btn-logout">Logout</a>
             </div>
         </div>
+
+        <div id="new-chat-bar">
+            <button class="btn-open-modal" onclick="openModal()">+ Type Number & Message</button>
+        </div>
+
         <div id="contact-list"></div>
     </div>
 
@@ -80,29 +102,93 @@
         </div>
     </div>
 
+    <!-- Direct Message Modal -->
+    <div id="modal-overlay">
+        <div class="modal-box">
+            <h3>Start Direct Conversation</h3>
+            <input type="text" id="new-phone" class="modal-input" placeholder="Phone Number (e.g. 919876543210)">
+            <textarea id="new-text" class="modal-input" rows="3" placeholder="Type your message..."></textarea>
+            <div class="modal-actions">
+                <button class="btn-cancel" onclick="closeModal()">Cancel</button>
+                <button class="btn-send-new" id="modalSendBtn" onclick="submitDirectMessage()">Send</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         let selectedPhone = null;
 
-        async function loadConversations() {
-            const res = await fetch('/api/conversations');
-            if (res.status === 401 || res.redirected) {
-                window.location.href = '/login';
+        function openModal() {
+            document.getElementById('modal-overlay').style.display = 'flex';
+            document.getElementById('new-phone').focus();
+        }
+
+        function closeModal() {
+            document.getElementById('modal-overlay').style.display = 'none';
+            document.getElementById('new-phone').value = '';
+            document.getElementById('new-text').value = '';
+        }
+
+        async function submitDirectMessage() {
+            const phone = document.getElementById('new-phone').value.trim();
+            const text = document.getElementById('new-text').value.trim();
+            const btn = document.getElementById('modalSendBtn');
+
+            if (!phone || !text) {
+                alert('Please enter both a phone number and message.');
                 return;
             }
-            const contacts = await res.json();
-            const listEl = document.getElementById('contact-list');
-            listEl.innerHTML = '';
 
-            contacts.forEach(c => {
-                const div = document.createElement('div');
-                div.className = 'contact-item' + (c.phone === selectedPhone ? ' active' : '');
-                div.onclick = () => selectContact(c.phone);
-                div.innerHTML = `
-                    <div class="contact-phone">+${c.phone}</div>
-                    <div class="contact-preview">${c.last_message}</div>
-                `;
-                listEl.appendChild(div);
-            });
+            btn.disabled = true;
+            btn.innerText = 'Sending...';
+
+            try {
+                const res = await fetch('/api/start_new_chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phone: phone, text: text })
+                });
+
+                const data = await res.json();
+                if (res.ok) {
+                    closeModal();
+                    await loadConversations();
+                    selectContact(data.phone);
+                } else {
+                    alert('Error: ' + (data.error || 'Failed to send message.'));
+                }
+            } catch (err) {
+                alert('Connection error occurred.');
+            } finally {
+                btn.disabled = false;
+                btn.innerText = 'Send';
+            }
+        }
+
+        async function loadConversations() {
+            try {
+                const res = await fetch('/api/conversations');
+                if (res.status === 401 || res.redirected) {
+                    window.location.href = '/login';
+                    return;
+                }
+                const contacts = await res.json();
+                const listEl = document.getElementById('contact-list');
+                listEl.innerHTML = '';
+
+                contacts.forEach(c => {
+                    const div = document.createElement('div');
+                    div.className = 'contact-item' + (c.phone === selectedPhone ? ' active' : '');
+                    div.onclick = () => selectContact(c.phone);
+                    div.innerHTML = `
+                        <div class="contact-phone">+${c.phone}</div>
+                        <div class="contact-preview">${c.last_message}</div>
+                    `;
+                    listEl.appendChild(div);
+                });
+            } catch (err) {
+                console.error("Error loading conversations:", err);
+            }
         }
 
         async function selectContact(phone) {
@@ -114,18 +200,44 @@
 
         async function loadMessages() {
             if (!selectedPhone) return;
-            const res = await fetch(`/api/messages/${selectedPhone}`);
-            const messages = await res.json();
-            const box = document.getElementById('messages-box');
-            box.innerHTML = '';
+            try {
+                const res = await fetch(`/api/messages/${selectedPhone}`);
+                const messages = await res.json();
+                const box = document.getElementById('messages-box');
+                box.innerHTML = '';
 
-            messages.forEach(m => {
-                const bubble = document.createElement('div');
-                bubble.className = `msg ${m.sender}`;
-                bubble.innerHTML = `<div>${m.text}</div><div class="msg-time">${m.timestamp}</div>`;
-                box.appendChild(bubble);
-            });
-            box.scrollTop = box.scrollHeight;
+                messages.forEach(m => {
+                    const bubble = document.createElement('div');
+                    const isFailed = (m.sender === 'business' && m.status === 'failed');
+                    bubble.className = `msg ${m.sender}` + (isFailed ? ' msg-failed' : '');
+
+                    let statusHtml = '';
+                    if (m.sender === 'business') {
+                        if (m.status === 'failed') {
+                            statusHtml = `
+                                <div class="msg-status-failed">✕ Undelivered</div>
+                                ${m.error_reason ? `<div class="error-badge">${m.error_reason}</div>` : ''}
+                            `;
+                        } else if (m.status === 'read') {
+                            statusHtml = `<div class="msg-time" style="color: #0d6efd; font-weight: 600;">✓✓ Read</div>`;
+                        } else if (m.status === 'delivered') {
+                            statusHtml = `<div class="msg-time" style="color: #0dcaf0;">✓✓ Delivered</div>`;
+                        } else {
+                            statusHtml = `<div class="msg-time">✓ Sent</div>`;
+                        }
+                    }
+
+                    bubble.innerHTML = `
+                        <div>${m.text}</div>
+                        <div class="msg-time">${m.timestamp}</div>
+                        ${statusHtml}
+                    `;
+                    box.appendChild(bubble);
+                });
+                box.scrollTop = box.scrollHeight;
+            } catch (err) {
+                console.error("Error loading messages:", err);
+            }
         }
 
         async function sendReply() {
@@ -134,17 +246,22 @@
             if (!text || !selectedPhone) return;
 
             input.value = '';
-            const res = await fetch('/api/send_reply', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ phone: selectedPhone, text: text })
-            });
+            try {
+                const res = await fetch('/api/send_reply', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ phone: selectedPhone, text: text })
+                });
 
-            if (res.ok) {
-                loadMessages();
-                loadConversations();
-            } else {
-                alert('Failed to send message.');
+                if (res.ok) {
+                    loadMessages();
+                    loadConversations();
+                } else {
+                    const data = await res.json();
+                    alert('Error: ' + (data.error || 'Failed to send reply.'));
+                }
+            } catch (err) {
+                alert('Failed to send reply.');
             }
         }
 
