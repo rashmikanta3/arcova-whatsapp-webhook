@@ -53,7 +53,7 @@ def login_required(f):
 
 
 # ---------------------------------------------------------
-# Authentication Routes
+# Authentication Endpoints
 # ---------------------------------------------------------
 @app.route("/login", methods=["GET", "POST"])
 def login():
@@ -101,7 +101,7 @@ def logout():
 
 
 # ---------------------------------------------------------
-# Webhook Verification & Receiving (Must Stay Public)
+# Webhook Verification & Unified Event Handling (Public)
 # ---------------------------------------------------------
 @app.route("/webhook", methods=["GET"])
 def verify_webhook():
@@ -123,6 +123,18 @@ def receive_message():
         changes = entry.get("changes", [{}])[0]
         value = changes.get("value", {})
 
+        # 1. Delivery & Read Status Updates
+        if "statuses" in value:
+            status_obj = value["statuses"][0]
+            status = status_obj.get("status")  # 'sent', 'delivered', 'read', 'failed'
+            recipient_id = status_obj.get("recipient_id")
+            print(f"STATUS UPDATE -> Recipient: {recipient_id} | Status: {status}")
+
+            if status == "failed":
+                errors = status_obj.get("errors", [])
+                print(f"DELIVERY FAILURE REASON for {recipient_id}: {errors}")
+
+        # 2. Inbound Customer Messages
         if "messages" in value:
             msg_obj = value["messages"][0]
             phone = msg_obj.get("from")
@@ -149,38 +161,6 @@ def receive_message():
 
     return jsonify(status="received"), 200
 
-
-
-@app.route("/webhook", methods=["POST"])
-def receive_message():
-    data = request.get_json()
-    try:
-        entry = data.get("entry", [{}])[0]
-        changes = entry.get("changes", [{}])[0]
-        value = changes.get("value", {})
-
-        # Check for message delivery status updates
-        if "statuses" in value:
-            status_obj = value["statuses"][0]
-            msg_id = status_obj.get("id")
-            status = status_obj.get("status")  # 'sent', 'delivered', 'read', or 'failed'
-            recipient_id = status_obj.get("recipient_id")
-
-            print(f"STATUS UPDATE -> Recipient: {recipient_id} | Status: {status}")
-
-            if status == "failed":
-                errors = status_obj.get("errors", [])
-                print(f"DELIVERY FAILURE REASON: {errors}")
-
-        # Handling normal incoming customer messages
-        if "messages" in value:
-            # ... existing incoming message logic ...
-            pass
-
-    except Exception as e:
-        print(f"Error handling webhook payload: {e}")
-
-    return jsonify(status="received"), 200
 
 # ---------------------------------------------------------
 # Protected Dashboard & Chat API Routes
@@ -284,6 +264,53 @@ def send_reply():
         return jsonify({"status": "success"})
     else:
         return jsonify({"error": resp.text}), resp.status_code
+
+
+@app.route("/api/start_new_chat", methods=["POST"])
+@login_required
+def start_new_chat():
+    req_data = request.get_json()
+    raw_phone = req_data.get("phone", "").strip()
+    text = req_data.get("text", "").strip()
+
+    if not raw_phone or not text:
+        return jsonify({"error": "Phone number and message text are required."}), 400
+
+    phone = "".join(c for c in str(raw_phone) if c.isdigit())
+    if len(phone) == 10:
+        phone = "91" + phone
+
+    if len(phone) < 12:
+        return jsonify({"error": "Phone number must have at least 10 digits."}), 400
+
+    headers = {
+        "Authorization": f"Bearer {TOKEN}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": phone,
+        "type": "text",
+        "text": {"body": text},
+    }
+
+    resp = requests.post(GRAPH_URL, headers=headers, json=payload)
+    if resp.status_code == 200:
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        supabase.table("messages").insert(
+            {
+                "phone": str(phone),
+                "sender": "business",
+                "message_text": text,
+                "timestamp": now_str,
+            }
+        ).execute()
+
+        return jsonify({"status": "success", "phone": phone})
+    else:
+        err_msg = resp.json().get("error", {}).get("message", resp.text)
+        return jsonify({"error": err_msg}), resp.status_code
 
 
 # ---------------------------------------------------------
