@@ -184,7 +184,7 @@
             {% if messages %}
                 <div class="flash-messages">
                     {% for category, msg in messages %}
-                        <div class="flash {{ category }}">{{ msg }}</div>
+                        <div class="flash {{ category }}">{{ msg|safe }}</div>
                     {% endfor %}
                 </div>
             {% endif %}
