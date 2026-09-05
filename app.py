@@ -36,7 +36,50 @@ if not SUPABASE_URL or not SUPABASE_KEY:
     print("WARNING: SUPABASE_URL or SUPABASE_KEY environment variables are missing!")
 
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+# ---------------------------------------------------------
+#Log in route
+# ---------------------------------------------------------
 
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        user_input = request.form.get("username", "").strip()
+        pwd_input = request.form.get("password", "").strip()
+
+        if not user_input or not pwd_input:
+            flash("Please enter both ID and password.", "login_error")
+            return redirect(url_for("login"))
+
+        try:
+            # Query Supabase for matching credentials
+            response = (
+                supabase.table("admins")
+                .select("username")
+                .eq("username", user_input)
+                .eq("password", pwd_input)
+                .limit(1)
+                .execute()
+            )
+
+            # If a match is found in the database
+            if response.data and len(response.data) > 0:
+                session["logged_in"] = True
+                session["user"] = response.data[0]["username"]
+                return redirect(url_for("dashboard"))
+            else:
+                flash("Invalid ID or password.", "login_error")
+                return redirect(url_for("login"))
+
+        except Exception as e:
+            print(f"Supabase login error: {e}")
+            flash("Database connection error. Try again.", "login_error")
+            return redirect(url_for("login"))
+
+    # If already logged in, redirect straight to dashboard
+    if session.get("logged_in"):
+        return redirect(url_for("dashboard"))
+
+    return render_template("login.html")
 
 # ---------------------------------------------------------
 # Webhook Verification & Message Receiving
