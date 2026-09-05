@@ -51,13 +51,14 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+
 # ---------------------------------------------------------
 # Public Legal Pages (Required for Meta App Live Review)
 # ---------------------------------------------------------
-
 @app.route("/privacy-policy")
 def privacy_policy():
     return render_template("privacy_policy.html")
+
 
 # ---------------------------------------------------------
 # Authentication Endpoints
@@ -133,18 +134,33 @@ def receive_message():
         # 1. Delivery & Read Status Updates
         if "statuses" in value:
             status_obj = value["statuses"][0]
+            wamid = status_obj.get("id")
             status = status_obj.get("status")  # 'sent', 'delivered', 'read', 'failed'
             recipient_id = status_obj.get("recipient_id")
-            print(f"STATUS UPDATE -> Recipient: {recipient_id} | Status: {status}")
+
+            update_payload = {"status": status}
 
             if status == "failed":
-                errors = status_obj.get("errors", [])
-                print(f"DELIVERY FAILURE REASON for {recipient_id}: {errors}")
+                errors = status_obj.get("errors", [{}])
+                err_title = (
+                    errors[0].get("title", "Delivery Failed")
+                    if errors
+                    else "Delivery Failed"
+                )
+                err_code = errors[0].get("code", "") if errors else ""
+                update_payload["error_reason"] = f"{err_title} (Code: {err_code})"
+                print(f"FAILED DELIVERY for {recipient_id}: {err_title} (Code: {err_code})")
+            else:
+                print(f"STATUS UPDATE -> Recipient: {recipient_id} | Status: {status}")
+
+            if wamid:
+                supabase.table("messages").update(update_payload).eq("wamid", wamid).execute()
 
         # 2. Inbound Customer Messages
         if "messages" in value:
             msg_obj = value["messages"][0]
             phone = msg_obj.get("from")
+            wamid = msg_obj.get("id")
             now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
             if msg_obj.get("type") == "text":
@@ -160,6 +176,8 @@ def receive_message():
                     "sender": "customer",
                     "message_text": text,
                     "timestamp": now_str,
+                    "wamid": wamid,
+                    "status": "received",
                 }
             ).execute()
 
@@ -215,7 +233,7 @@ def get_messages(phone):
     try:
         res = (
             supabase.table("messages")
-            .select("sender, message_text, timestamp")
+            .select("sender, message_text, timestamp, status, error_reason")
             .eq("phone", phone)
             .order("id", desc=False)
             .execute()
@@ -223,9 +241,11 @@ def get_messages(phone):
 
         messages = [
             {
-                "sender": m["sender"],
-                "text": m["message_text"],
-                "timestamp": m["timestamp"],
+                "sender": m.get("sender"),
+                "text": m.get("message_text"),
+                "timestamp": m.get("timestamp"),
+                "status": m.get("status", "sent"),
+                "error_reason": m.get("error_reason", ""),
             }
             for m in res.data
         ]
@@ -258,6 +278,7 @@ def send_reply():
     resp = requests.post(GRAPH_URL, headers=headers, json=payload)
     if resp.status_code == 200:
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        wamid = resp.json().get("messages", [{}])[0].get("id")
 
         supabase.table("messages").insert(
             {
@@ -265,6 +286,8 @@ def send_reply():
                 "sender": "business",
                 "message_text": text,
                 "timestamp": now_str,
+                "wamid": wamid,
+                "status": "sent",
             }
         ).execute()
 
@@ -304,6 +327,7 @@ def start_new_chat():
     resp = requests.post(GRAPH_URL, headers=headers, json=payload)
     if resp.status_code == 200:
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        wamid = resp.json().get("messages", [{}])[0].get("id")
 
         supabase.table("messages").insert(
             {
@@ -311,6 +335,8 @@ def start_new_chat():
                 "sender": "business",
                 "message_text": text,
                 "timestamp": now_str,
+                "wamid": wamid,
+                "status": "sent",
             }
         ).execute()
 
@@ -442,12 +468,16 @@ def broadcast():
 
                 if res.status_code == 200:
                     success_count += 1
+                    wamid = res.json().get("messages", [{}])[0].get("id")
+
                     supabase.table("messages").insert(
                         {
                             "phone": str(phone),
                             "sender": "business",
                             "message_text": f"[Template: {template_name}]",
                             "timestamp": now_str,
+                            "wamid": wamid,
+                            "status": "sent",
                         }
                     ).execute()
                 else:
