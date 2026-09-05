@@ -1,43 +1,30 @@
 from datetime import datetime
 import os
-import sqlite3
 from dotenv import load_dotenv
 from flask import Flask, jsonify, render_template, request
 import requests
+from supabase import Client, create_client
 
-# Load environment variables from .env file (for local development)
 load_dotenv()
 
 app = Flask(__name__)
 
-# --- Environment Variables / Secret Credentials ---
+# --- Meta API Configuration ---
 TOKEN = os.getenv("TOKEN")
 PHONE_ID = os.getenv("PHONE_ID")
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "arcova_secret_123")
-
 GRAPH_URL = f"https://graph.facebook.com/v20.0/{PHONE_ID}/messages"
-DB_FILE = "chats.db"
 
+# --- Supabase Database Configuration ---
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
-def init_db():
-    """Initializes the SQLite database to store chat history."""
-    with sqlite3.connect(DB_FILE) as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                phone TEXT NOT NULL,
-                sender TEXT NOT NULL,  -- 'customer' or 'business'
-                message_text TEXT NOT NULL,
-                timestamp TEXT NOT NULL
-            )
-        """
-        )
-        conn.commit()
+if not SUPABASE_URL or not SUPABASE_KEY:
+    print(
+        "WARNING: SUPABASE_URL or SUPABASE_KEY environment variables are missing!"
+    )
 
-
-init_db()
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
 # ---------------------------------------------------------
@@ -45,7 +32,6 @@ init_db()
 # ---------------------------------------------------------
 @app.route("/webhook", methods=["GET"])
 def verify_webhook():
-    """Handles Meta's handshake verification."""
     mode = request.args.get("hub.mode")
     token = request.args.get("hub.verify_token")
     challenge = request.args.get("hub.challenge")
@@ -57,7 +43,6 @@ def verify_webhook():
 
 @app.route("/webhook", methods=["POST"])
 def receive_message():
-    """Catches incoming customer messages from WhatsApp."""
     data = request.get_json()
 
     try:
@@ -70,7 +55,6 @@ def receive_message():
             phone = msg_obj.get("from")
             now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-            # Extract message text or note media type
             if msg_obj.get("type") == "text":
                 text = msg_obj["text"]["body"]
             elif msg_obj.get("type") == "button":
@@ -78,20 +62,18 @@ def receive_message():
             else:
                 text = f"[{msg_obj.get('type', 'MEDIA').upper()} attachment]"
 
-            # Save inbound customer message to database
-            with sqlite3.connect(DB_FILE) as conn:
-                cursor = conn.cursor()
-                cursor.execute(
-                    """
-                    INSERT INTO messages (phone, sender, message_text, timestamp)
-                    VALUES (?, 'customer', ?, ?)
-                """,
-                    (phone, text, now_str),
-                )
-                conn.commit()
+            # Insert customer message directly into Supabase
+            supabase.table("messages").insert(
+                {
+                    "phone": str(phone),
+                    "sender": "customer",
+                    "message_text": text,
+                    "timestamp": now_str,
+                }
+            ).execute()
 
     except Exception as e:
-        print(f"Error parsing webhook payload: {e}")
+        print(f"Error handling webhook payload: {e}")
 
     return jsonify(status="received"), 200
 
@@ -101,54 +83,64 @@ def receive_message():
 # ---------------------------------------------------------
 @app.route("/")
 def dashboard():
-    """Renders the chat dashboard."""
     return render_template("index.html")
 
 
 @app.route("/api/conversations", methods=["GET"])
 def get_conversations():
-    """Returns a list of unique contacts who have messaged, along with their last message."""
-    with sqlite3.connect(DB_FILE) as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT phone, message_text, timestamp 
-            FROM messages 
-            WHERE id IN (SELECT MAX(id) FROM messages GROUP BY phone)
-            ORDER BY timestamp DESC
-        """
+    try:
+        # Fetch all messages ordered by newest first
+        res = (
+            supabase.table("messages")
+            .select("phone, message_text, timestamp")
+            .order("id", desc=True)
+            .execute()
         )
-        rows = cursor.fetchall()
+        all_msgs = res.data
 
-    contacts = [
-        {"phone": r[0], "last_message": r[1], "timestamp": r[2]} for r in rows
-    ]
-    return jsonify(contacts)
+        # Filter out unique latest message per phone number
+        seen_phones = set()
+        contacts = []
+        for msg in all_msgs:
+            phone = msg["phone"]
+            if phone not in seen_phones:
+                seen_phones.add(phone)
+                contacts.append(
+                    {
+                        "phone": phone,
+                        "last_message": msg["message_text"],
+                        "timestamp": msg["timestamp"],
+                    }
+                )
+
+        return jsonify(contacts)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/messages/<phone>", methods=["GET"])
 def get_messages(phone):
-    """Returns all message history for a specific phone number."""
-    with sqlite3.connect(DB_FILE) as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT sender, message_text, timestamp 
-            FROM messages 
-            WHERE phone = ? 
-            ORDER BY id ASC
-        """,
-            (phone,),
+    try:
+        # Fetch conversation history in chronological order
+        res = (
+            supabase.table("messages")
+            .select("sender, message_text, timestamp")
+            .eq("phone", phone)
+            .order("id", desc=False)
+            .execute()
         )
-        rows = cursor.fetchall()
 
-    messages = [{"sender": r[0], "text": r[1], "timestamp": r[2]} for r in rows]
-    return jsonify(messages)
+        messages = [
+            {"sender": m["sender"], "text": m["message_text"], "timestamp": m["timestamp"]}
+            for m in res.data
+        ]
+        return jsonify(messages)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/send_reply", methods=["POST"])
 def send_reply():
-    """Sends a text reply to a customer via the WhatsApp Cloud API and stores it."""
     req_data = request.get_json()
     phone = req_data.get("phone")
     text = req_data.get("text", "").strip()
@@ -170,16 +162,17 @@ def send_reply():
     resp = requests.post(GRAPH_URL, headers=headers, json=payload)
     if resp.status_code == 200:
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        with sqlite3.connect(DB_FILE) as conn:
-            cursor = conn.cursor()
-            cursor.execute(
-                """
-                INSERT INTO messages (phone, sender, message_text, timestamp)
-                VALUES (?, 'business', ?, ?)
-            """,
-                (phone, text, now_str),
-            )
-            conn.commit()
+
+        # Save outgoing business message to Supabase
+        supabase.table("messages").insert(
+            {
+                "phone": str(phone),
+                "sender": "business",
+                "message_text": text,
+                "timestamp": now_str,
+            }
+        ).execute()
+
         return jsonify({"status": "success"})
     else:
         return jsonify({"error": resp.text}), resp.status_code
