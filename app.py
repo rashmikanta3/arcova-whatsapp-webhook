@@ -51,6 +51,13 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+# ---------------------------------------------------------
+# Public Legal Pages (Required for Meta App Live Review)
+# ---------------------------------------------------------
+
+@app.route("/privacy-policy")
+def privacy_policy():
+    return render_template("privacy_policy.html")
 
 # ---------------------------------------------------------
 # Authentication Endpoints
