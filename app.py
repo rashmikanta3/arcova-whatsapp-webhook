@@ -150,6 +150,38 @@ def receive_message():
     return jsonify(status="received"), 200
 
 
+
+@app.route("/webhook", methods=["POST"])
+def receive_message():
+    data = request.get_json()
+    try:
+        entry = data.get("entry", [{}])[0]
+        changes = entry.get("changes", [{}])[0]
+        value = changes.get("value", {})
+
+        # Check for message delivery status updates
+        if "statuses" in value:
+            status_obj = value["statuses"][0]
+            msg_id = status_obj.get("id")
+            status = status_obj.get("status")  # 'sent', 'delivered', 'read', or 'failed'
+            recipient_id = status_obj.get("recipient_id")
+
+            print(f"STATUS UPDATE -> Recipient: {recipient_id} | Status: {status}")
+
+            if status == "failed":
+                errors = status_obj.get("errors", [])
+                print(f"DELIVERY FAILURE REASON: {errors}")
+
+        # Handling normal incoming customer messages
+        if "messages" in value:
+            # ... existing incoming message logic ...
+            pass
+
+    except Exception as e:
+        print(f"Error handling webhook payload: {e}")
+
+    return jsonify(status="received"), 200
+
 # ---------------------------------------------------------
 # Protected Dashboard & Chat API Routes
 # ---------------------------------------------------------
