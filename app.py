@@ -20,27 +20,33 @@ from supabase import Client, create_client
 load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = os.getenv(
-    "FLASK_SECRET_KEY", "arcova_super_secret_session_key"
-)
+app.secret_key = os.getenv("FLASK_SECRET_KEY", "arcova_super_secret_session_key")
 
-# --- Configuration ---
+# --- Meta API Configuration ---
 TOKEN = os.getenv("TOKEN")
 PHONE_ID = os.getenv("PHONE_ID")
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "arcova_secret_123")
 GRAPH_URL = f"https://graph.facebook.com/v20.0/{PHONE_ID}/messages"
 
+# --- Supabase Configuration ---
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+if not SUPABASE_URL or not SUPABASE_KEY:
+    print("WARNING: SUPABASE_URL or SUPABASE_KEY environment variables are missing!")
+
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
-# --- Existing Webhook & Chat Dashboard Routes ---
+# ---------------------------------------------------------
+# Webhook Verification & Message Receiving
+# ---------------------------------------------------------
 @app.route("/webhook", methods=["GET"])
 def verify_webhook():
     mode = request.args.get("hub.mode")
     token = request.args.get("hub.verify_token")
     challenge = request.args.get("hub.challenge")
+
     if mode == "subscribe" and token == VERIFY_TOKEN:
         return challenge, 200
     return "Verification failed", 403
@@ -49,6 +55,7 @@ def verify_webhook():
 @app.route("/webhook", methods=["POST"])
 def receive_message():
     data = request.get_json()
+
     try:
         entry = data.get("entry", [{}])[0]
         changes = entry.get("changes", [{}])[0]
@@ -66,6 +73,7 @@ def receive_message():
             else:
                 text = f"[{msg_obj.get('type', 'MEDIA').upper()} attachment]"
 
+            # Store customer message in Supabase
             supabase.table("messages").insert(
                 {
                     "phone": str(phone),
@@ -74,11 +82,16 @@ def receive_message():
                     "timestamp": now_str,
                 }
             ).execute()
+
     except Exception as e:
-        print(f"Webhook error: {e}")
+        print(f"Error handling webhook payload: {e}")
+
     return jsonify(status="received"), 200
 
 
+# ---------------------------------------------------------
+# Web Dashboard Routes
+# ---------------------------------------------------------
 @app.route("/")
 def dashboard():
     return render_template("index.html")
@@ -93,9 +106,11 @@ def get_conversations():
             .order("id", desc=True)
             .execute()
         )
+        all_msgs = res.data
+
         seen_phones = set()
         contacts = []
-        for msg in res.data:
+        for msg in all_msgs:
             phone = msg["phone"]
             if phone not in seen_phones:
                 seen_phones.add(phone)
@@ -106,6 +121,7 @@ def get_conversations():
                         "timestamp": msg["timestamp"],
                     }
                 )
+
         return jsonify(contacts)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -121,8 +137,13 @@ def get_messages(phone):
             .order("id", desc=False)
             .execute()
         )
+
         messages = [
-            {"sender": m["sender"], "text": m["message_text"], "timestamp": m["timestamp"]}
+            {
+                "sender": m["sender"],
+                "text": m["message_text"],
+                "timestamp": m["timestamp"],
+            }
             for m in res.data
         ]
         return jsonify(messages)
@@ -137,7 +158,7 @@ def send_reply():
     text = req_data.get("text", "").strip()
 
     if not phone or not text:
-        return jsonify({"error": "Phone and text required"}), 400
+        return jsonify({"error": "Phone and text are required"}), 400
 
     headers = {
         "Authorization": f"Bearer {TOKEN}",
@@ -153,6 +174,7 @@ def send_reply():
     resp = requests.post(GRAPH_URL, headers=headers, json=payload)
     if resp.status_code == 200:
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
         supabase.table("messages").insert(
             {
                 "phone": str(phone),
@@ -161,12 +183,14 @@ def send_reply():
                 "timestamp": now_str,
             }
         ).execute()
+
         return jsonify({"status": "success"})
-    return jsonify({"error": resp.text}), resp.status_code
+    else:
+        return jsonify({"error": resp.text}), resp.status_code
 
 
 # ---------------------------------------------------------
-# Dynamic Bulk Broadcast (Row-by-Row Template & Image)
+# Dynamic Bulk Broadcast Route
 # ---------------------------------------------------------
 @app.route("/broadcast", methods=["GET", "POST"])
 def broadcast():
@@ -204,11 +228,6 @@ def broadcast():
                     if pd.notna(row.get("Language_Code"))
                     else "en"
                 )
-                image_url = (
-                    str(row.get("Image_URL", "")).strip()
-                    if pd.notna(row.get("Image_URL"))
-                    else ""
-                )
 
                 if (
                     pd.isna(raw_phone)
@@ -217,10 +236,11 @@ def broadcast():
                 ):
                     fail_count += 1
                     error_details.append(
-                        f"Row {idx + 2}: Empty phone or template name."
+                        f"Row {idx + 2}: Empty phone number or template name."
                     )
                     continue
 
+                # Format Phone Number
                 phone = "".join(c for c in str(raw_phone) if c.isdigit())
                 if len(phone) == 10:
                     phone = "91" + phone
@@ -233,7 +253,18 @@ def broadcast():
                     continue
 
                 components = []
-                if image_url and image_url.startswith("http"):
+
+                # 1. Header Media Component (Image)
+                image_url = (
+                    str(row.get("Image_URL", "")).strip()
+                    if pd.notna(row.get("Image_URL"))
+                    else ""
+                )
+                if (
+                    image_url
+                    and image_url.lower() != "nan"
+                    and image_url.startswith("http")
+                ):
                     components.append(
                         {
                             "type": "header",
@@ -243,8 +274,26 @@ def broadcast():
                         }
                     )
 
+                # 2. Dynamic Body Variables (Var1 to Var5)
+                body_params = []
+                for i in range(1, 6):
+                    col_name = f"Var{i}"
+                    if col_name in df.columns:
+                        val = row.get(col_name)
+                        if pd.notna(val):
+                            text_val = str(val).strip()
+                            if text_val and text_val.lower() != "nan":
+                                body_params.append(
+                                    {"type": "text", "text": text_val}
+                                )
+
+                if body_params:
+                    components.append({"type": "body", "parameters": body_params})
+
+                # 3. Payload Construction
                 payload = {
                     "messaging_product": "whatsapp",
+                    "recipient_type": "individual",
                     "to": phone,
                     "type": "template",
                     "template": {
@@ -252,9 +301,11 @@ def broadcast():
                         "language": {"code": lang_code},
                     },
                 }
+
                 if components:
                     payload["template"]["components"] = components
 
+                # 4. API Request
                 res = requests.post(GRAPH_URL, headers=headers, json=payload)
                 now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -273,41 +324,56 @@ def broadcast():
                     err_msg = res.json().get("error", {}).get("message", res.text)
                     error_details.append(f"Row {idx + 2} ({phone}): {err_msg}")
                     print(
-                        f"META API REJECTION [{res.status_code}]: {res.text}"
+                        f"Failed sending to {phone} [{res.status_code}]: {res.text}"
                     )
 
-                time.sleep(0.5)
+                time.sleep(0.4)
 
             if fail_count > 0:
-                summary_msg = f"Sent: {success_count} | Failed: {fail_count} <br><br><strong>Rejection Details:</strong><br>" + "<br>".join(
+                summary_msg = f"Campaign run completed.<br>Sent: {success_count} | Failed: {fail_count}<br><br><strong>Rejection Details:</strong><br>" + "<br>".join(
                     error_details
                 )
                 flash(summary_msg, "error")
             else:
                 flash(
-                    f"Campaign completed! Successfully sent to all {success_count} contacts.",
+                    f"Campaign completed successfully! All {success_count} messages were sent.",
                     "success",
                 )
 
             return redirect(url_for("broadcast"))
 
         except Exception as e:
-            flash(f"Error processing file: {str(e)}", "error")
+            flash(f"Error reading file: {str(e)}", "error")
             return redirect(url_for("broadcast"))
 
     return render_template("broadcast.html")
+
+
+# ---------------------------------------------------------
+# Dynamic Excel Sample Generator
+# ---------------------------------------------------------
 @app.route("/download-sample")
 def download_sample():
-    """Generates a downloadable sample Excel sheet with template and image columns."""
     sample_data = {
-        "Phone": ["919556681223", "919937780774"],
-        "Template_Name": ["janmastami", "janmastami"],
-        "Language_Code": ["en", "en"],
-        "Image_URL(download_able": [
+        "Phone": ["919556681223", "919937780774", "917008973622"],
+        "Template_Name": [
+            "image_only_template",
+            "text_with_vars_template",
+            "image_and_vars_template",
+        ],
+        "Language_Code": ["en", "en", "en"],
+        "Image_URL": [
             "https://lh3.googleusercontent.com/d/10oUnRNZPxE-gBs2I-l6NL0ES9dckObCP",
+            "",
             "https://lh3.googleusercontent.com/d/10oUnRNZPxE-gBs2I-l6NL0ES9dckObCP",
         ],
+        "Var1": ["", "Valued Client", "Valued Client"],
+        "Var2": ["", "Arcova Homes", "Arcova Homes"],
+        "Var3": ["", "", "Phase 2 Launch"],
+        "Var4": ["", "", "Saturday"],
+        "Var5": ["", "", ""],
     }
+
     df = pd.DataFrame(sample_data)
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
