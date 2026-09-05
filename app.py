@@ -180,7 +180,6 @@ def broadcast():
         try:
             df = pd.read_excel(uploaded_file, dtype=str)
 
-            # Validate required columns
             required_cols = {"Phone", "Template_Name"}
             if not required_cols.issubset(df.columns):
                 flash(
@@ -191,12 +190,13 @@ def broadcast():
 
             success_count = 0
             fail_count = 0
+            error_details = []
             headers = {
                 "Authorization": f"Bearer {TOKEN}",
                 "Content-Type": "application/json",
             }
 
-            for _, row in df.iterrows():
+            for idx, row in df.iterrows():
                 raw_phone = row.get("Phone")
                 template_name = str(row.get("Template_Name", "")).strip()
                 lang_code = (
@@ -210,7 +210,15 @@ def broadcast():
                     else ""
                 )
 
-                if pd.isna(raw_phone) or not template_name or template_name.lower() == "nan":
+                if (
+                    pd.isna(raw_phone)
+                    or not template_name
+                    or template_name.lower() == "nan"
+                ):
+                    fail_count += 1
+                    error_details.append(
+                        f"Row {idx + 2}: Empty phone or template name."
+                    )
                     continue
 
                 phone = "".join(c for c in str(raw_phone) if c.isdigit())
@@ -219,9 +227,11 @@ def broadcast():
 
                 if len(phone) < 12:
                     fail_count += 1
+                    error_details.append(
+                        f"Row {idx + 2}: Phone number '{raw_phone}' must have at least 10 digits."
+                    )
                     continue
 
-                # Build template components if an image URL is specified
                 components = []
                 if image_url and image_url.startswith("http"):
                     components.append(
@@ -250,7 +260,6 @@ def broadcast():
 
                 if res.status_code == 200:
                     success_count += 1
-                    # Record the sent message in Supabase
                     supabase.table("messages").insert(
                         {
                             "phone": str(phone),
@@ -261,13 +270,25 @@ def broadcast():
                     ).execute()
                 else:
                     fail_count += 1
+                    err_msg = res.json().get("error", {}).get("message", res.text)
+                    error_details.append(f"Row {idx + 2} ({phone}): {err_msg}")
+                    print(
+                        f"META API REJECTION [{res.status_code}]: {res.text}"
+                    )
 
-                time.sleep(0.5)  # Pause to respect rate limits
+                time.sleep(0.5)
 
-            flash(
-                f"Campaign finished! Successfully Sent: {success_count} | Failed/Skipped: {fail_count}",
-                "success",
-            )
+            if fail_count > 0:
+                summary_msg = f"Sent: {success_count} | Failed: {fail_count} <br><br><strong>Rejection Details:</strong><br>" + "<br>".join(
+                    error_details
+                )
+                flash(summary_msg, "error")
+            else:
+                flash(
+                    f"Campaign completed! Successfully sent to all {success_count} contacts.",
+                    "success",
+                )
+
             return redirect(url_for("broadcast"))
 
         except Exception as e:
@@ -275,8 +296,6 @@ def broadcast():
             return redirect(url_for("broadcast"))
 
     return render_template("broadcast.html")
-
-
 @app.route("/download-sample")
 def download_sample():
     """Generates a downloadable sample Excel sheet with template and image columns."""
