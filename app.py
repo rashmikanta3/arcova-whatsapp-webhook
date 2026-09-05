@@ -1,41 +1,46 @@
 from datetime import datetime
+import io
 import os
+import time
 from dotenv import load_dotenv
-from flask import Flask, jsonify, render_template, request
+from flask import (
+    Flask,
+    flash,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    url_for,
+)
+import pandas as pd
 import requests
 from supabase import Client, create_client
 
 load_dotenv()
 
 app = Flask(__name__)
+app.secret_key = os.getenv(
+    "FLASK_SECRET_KEY", "arcova_super_secret_session_key"
+)
 
-# --- Meta API Configuration ---
+# --- Configuration ---
 TOKEN = os.getenv("TOKEN")
 PHONE_ID = os.getenv("PHONE_ID")
 VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "arcova_secret_123")
 GRAPH_URL = f"https://graph.facebook.com/v20.0/{PHONE_ID}/messages"
 
-# --- Supabase Database Configuration ---
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
-
-if not SUPABASE_URL or not SUPABASE_KEY:
-    print(
-        "WARNING: SUPABASE_URL or SUPABASE_KEY environment variables are missing!"
-    )
-
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 
-# ---------------------------------------------------------
-# Webhook Verification & Message Receiving
-# ---------------------------------------------------------
+# --- Existing Webhook & Chat Dashboard Routes ---
 @app.route("/webhook", methods=["GET"])
 def verify_webhook():
     mode = request.args.get("hub.mode")
     token = request.args.get("hub.verify_token")
     challenge = request.args.get("hub.challenge")
-
     if mode == "subscribe" and token == VERIFY_TOKEN:
         return challenge, 200
     return "Verification failed", 403
@@ -44,7 +49,6 @@ def verify_webhook():
 @app.route("/webhook", methods=["POST"])
 def receive_message():
     data = request.get_json()
-
     try:
         entry = data.get("entry", [{}])[0]
         changes = entry.get("changes", [{}])[0]
@@ -62,7 +66,6 @@ def receive_message():
             else:
                 text = f"[{msg_obj.get('type', 'MEDIA').upper()} attachment]"
 
-            # Insert customer message directly into Supabase
             supabase.table("messages").insert(
                 {
                     "phone": str(phone),
@@ -71,16 +74,11 @@ def receive_message():
                     "timestamp": now_str,
                 }
             ).execute()
-
     except Exception as e:
-        print(f"Error handling webhook payload: {e}")
-
+        print(f"Webhook error: {e}")
     return jsonify(status="received"), 200
 
 
-# ---------------------------------------------------------
-# Web Dashboard Routes
-# ---------------------------------------------------------
 @app.route("/")
 def dashboard():
     return render_template("index.html")
@@ -89,19 +87,15 @@ def dashboard():
 @app.route("/api/conversations", methods=["GET"])
 def get_conversations():
     try:
-        # Fetch all messages ordered by newest first
         res = (
             supabase.table("messages")
             .select("phone, message_text, timestamp")
             .order("id", desc=True)
             .execute()
         )
-        all_msgs = res.data
-
-        # Filter out unique latest message per phone number
         seen_phones = set()
         contacts = []
-        for msg in all_msgs:
+        for msg in res.data:
             phone = msg["phone"]
             if phone not in seen_phones:
                 seen_phones.add(phone)
@@ -112,7 +106,6 @@ def get_conversations():
                         "timestamp": msg["timestamp"],
                     }
                 )
-
         return jsonify(contacts)
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -121,7 +114,6 @@ def get_conversations():
 @app.route("/api/messages/<phone>", methods=["GET"])
 def get_messages(phone):
     try:
-        # Fetch conversation history in chronological order
         res = (
             supabase.table("messages")
             .select("sender, message_text, timestamp")
@@ -129,7 +121,6 @@ def get_messages(phone):
             .order("id", desc=False)
             .execute()
         )
-
         messages = [
             {"sender": m["sender"], "text": m["message_text"], "timestamp": m["timestamp"]}
             for m in res.data
@@ -146,7 +137,7 @@ def send_reply():
     text = req_data.get("text", "").strip()
 
     if not phone or not text:
-        return jsonify({"error": "Phone and text are required"}), 400
+        return jsonify({"error": "Phone and text required"}), 400
 
     headers = {
         "Authorization": f"Bearer {TOKEN}",
@@ -162,8 +153,6 @@ def send_reply():
     resp = requests.post(GRAPH_URL, headers=headers, json=payload)
     if resp.status_code == 200:
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        # Save outgoing business message to Supabase
         supabase.table("messages").insert(
             {
                 "phone": str(phone),
@@ -172,10 +161,146 @@ def send_reply():
                 "timestamp": now_str,
             }
         ).execute()
-
         return jsonify({"status": "success"})
-    else:
-        return jsonify({"error": resp.text}), resp.status_code
+    return jsonify({"error": resp.text}), resp.status_code
+
+
+# ---------------------------------------------------------
+# Dynamic Bulk Broadcast (Row-by-Row Template & Image)
+# ---------------------------------------------------------
+@app.route("/broadcast", methods=["GET", "POST"])
+def broadcast():
+    if request.method == "POST":
+        uploaded_file = request.files.get("file")
+
+        if not uploaded_file or uploaded_file.filename == "":
+            flash("Please choose an Excel file to upload.", "error")
+            return redirect(url_for("broadcast"))
+
+        try:
+            df = pd.read_excel(uploaded_file, dtype=str)
+
+            # Validate required columns
+            required_cols = {"Phone", "Template_Name"}
+            if not required_cols.issubset(df.columns):
+                flash(
+                    "Excel must contain at least 'Phone' and 'Template_Name' columns.",
+                    "error",
+                )
+                return redirect(url_for("broadcast"))
+
+            success_count = 0
+            fail_count = 0
+            headers = {
+                "Authorization": f"Bearer {TOKEN}",
+                "Content-Type": "application/json",
+            }
+
+            for _, row in df.iterrows():
+                raw_phone = row.get("Phone")
+                template_name = str(row.get("Template_Name", "")).strip()
+                lang_code = (
+                    str(row.get("Language_Code", "en")).strip()
+                    if pd.notna(row.get("Language_Code"))
+                    else "en"
+                )
+                image_url = (
+                    str(row.get("Image_URL", "")).strip()
+                    if pd.notna(row.get("Image_URL"))
+                    else ""
+                )
+
+                if pd.isna(raw_phone) or not template_name or template_name.lower() == "nan":
+                    continue
+
+                phone = "".join(c for c in str(raw_phone) if c.isdigit())
+                if len(phone) == 10:
+                    phone = "91" + phone
+
+                if len(phone) < 12:
+                    fail_count += 1
+                    continue
+
+                # Build template components if an image URL is specified
+                components = []
+                if image_url and image_url.startswith("http"):
+                    components.append(
+                        {
+                            "type": "header",
+                            "parameters": [
+                                {"type": "image", "image": {"link": image_url}}
+                            ],
+                        }
+                    )
+
+                payload = {
+                    "messaging_product": "whatsapp",
+                    "to": phone,
+                    "type": "template",
+                    "template": {
+                        "name": template_name,
+                        "language": {"code": lang_code},
+                    },
+                }
+                if components:
+                    payload["template"]["components"] = components
+
+                res = requests.post(GRAPH_URL, headers=headers, json=payload)
+                now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                if res.status_code == 200:
+                    success_count += 1
+                    # Record the sent message in Supabase
+                    supabase.table("messages").insert(
+                        {
+                            "phone": str(phone),
+                            "sender": "business",
+                            "message_text": f"[Template: {template_name}]",
+                            "timestamp": now_str,
+                        }
+                    ).execute()
+                else:
+                    fail_count += 1
+
+                time.sleep(0.5)  # Pause to respect rate limits
+
+            flash(
+                f"Campaign finished! Successfully Sent: {success_count} | Failed/Skipped: {fail_count}",
+                "success",
+            )
+            return redirect(url_for("broadcast"))
+
+        except Exception as e:
+            flash(f"Error processing file: {str(e)}", "error")
+            return redirect(url_for("broadcast"))
+
+    return render_template("broadcast.html")
+
+
+@app.route("/download-sample")
+def download_sample():
+    """Generates a downloadable sample Excel sheet with template and image columns."""
+    sample_data = {
+        "Phone": ["919556681223", "919937780774"],
+        "Template_Name": ["janmastami", "janmastami"],
+        "Language_Code": ["en", "en"],
+        "Image_URL(download_able": [
+            "https://lh3.googleusercontent.com/d/10oUnRNZPxE-gBs2I-l6NL0ES9dckObCP",
+            "https://lh3.googleusercontent.com/d/10oUnRNZPxE-gBs2I-l6NL0ES9dckObCP",
+        ],
+    }
+    df = pd.DataFrame(sample_data)
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="Broadcast_Sample")
+    output.seek(0)
+
+    return send_file(
+        output,
+        download_name="sample_whatsapp_broadcast.xlsx",
+        as_attachment=True,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
 
 
 if __name__ == "__main__":
