@@ -6,28 +6,22 @@
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
         body { display: flex; height: 100vh; background-color: #f0f2f5; }
-        
-        /* Left Sidebar: Contact list */
         #sidebar { width: 340px; background: #ffffff; border-right: 1px solid #e0e0e0; display: flex; flex-direction: column; }
-        #sidebar-header { padding: 18px; font-size: 18px; font-weight: bold; background: #075e54; color: #fff; }
+        #sidebar-header { padding: 14px 18px; font-size: 17px; font-weight: bold; background: #075e54; color: #fff; display: flex; justify-content: space-between; align-items: center; }
+        .nav-btn { background: #25d366; color: #111; padding: 6px 12px; font-size: 13px; font-weight: bold; text-decoration: none; border-radius: 4px; }
+        .nav-btn:hover { background: #1eb954; }
         #contact-list { overflow-y: auto; flex: 1; }
         .contact-item { padding: 14px; border-bottom: 1px solid #f2f2f2; cursor: pointer; }
         .contact-item:hover, .contact-item.active { background-color: #ebebeb; }
         .contact-phone { font-weight: 600; color: #111; }
         .contact-preview { font-size: 13px; color: #666; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 4px; }
-        
-        /* Right Chat Area */
         #chat-area { flex: 1; display: flex; flex-direction: column; background: #efeae2; }
         #chat-header { padding: 16px; background: #ededed; font-weight: bold; border-bottom: 1px solid #ddd; }
         #messages-box { flex: 1; padding: 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
-        
-        /* Message bubbles */
         .msg { max-width: 60%; padding: 10px 14px; border-radius: 8px; font-size: 14px; line-height: 1.4; }
         .msg.customer { align-self: flex-start; background: #ffffff; color: #000; }
         .msg.business { align-self: flex-end; background: #d9fdd3; color: #000; }
         .msg-time { font-size: 10px; color: #888; text-align: right; margin-top: 4px; }
-
-        /* Reply box */
         #input-area { display: flex; padding: 12px; background: #f0f0f0; border-top: 1px solid #ddd; }
         #reply-input { flex: 1; padding: 12px; border: 1px solid #ccc; border-radius: 20px; outline: none; font-size: 14px; }
         #send-btn { margin-left: 10px; padding: 0 22px; background: #075e54; color: white; border: none; border-radius: 20px; font-weight: bold; cursor: pointer; }
@@ -37,7 +31,10 @@
 <body>
 
     <div id="sidebar">
-        <div id="sidebar-header">Arcova Conversations</div>
+        <div id="sidebar-header">
+            <span>Arcova Chats</span>
+            <a href="/broadcast" class="nav-btn">Bulk SMS</a>
+        </div>
         <div id="contact-list"></div>
     </div>
 
@@ -45,7 +42,7 @@
         <div id="chat-header">Select a contact to view chat</div>
         <div id="messages-box"></div>
         <div id="input-area" style="display: none;">
-            <input type="text" id="reply-input" placeholder="Type your WhatsApp reply..." onkeypress="if(event.key==='Enter') sendReply()">
+            <input type="text" id="reply-input" placeholder="Type a message..." onkeypress="if(event.key==='Enter') sendReply()">
             <button id="send-btn" onclick="sendReply()">Send</button>
         </div>
     </div>
@@ -53,7 +50,6 @@
     <script>
         let selectedPhone = null;
 
-        // Fetch contacts list every 3 seconds
         async function loadConversations() {
             const res = await fetch('/api/conversations');
             const contacts = await res.json();
@@ -79,7 +75,6 @@
             loadMessages();
         }
 
-        // Fetch active messages every 3 seconds
         async function loadMessages() {
             if (!selectedPhone) return;
             const res = await fetch(`/api/messages/${selectedPhone}`);
@@ -116,9 +111,8 @@
             }
         }
 
-        // Auto-refresh loops
-        setInterval(loadConversations, 3000);
-        setInterval(() => { if (selectedPhone) loadMessages(); }, 3000);
+        setInterval(loadConversations, 4000);
+        setInterval(() => { if (selectedPhone) loadMessages(); }, 4000);
         loadConversations();
     </script>
 </body>
